@@ -12,6 +12,7 @@
 
 #include <small_gicp/factors/icp_factor.hpp>
 #include <small_gicp/factors/plane_icp_factor.hpp>
+#include <small_gicp/factors/symmetric_plane_icp_factor.hpp>
 #include <small_gicp/factors/gicp_factor.hpp>
 #include <small_gicp/registration/reduction_omp.hpp>
 #include <small_gicp/registration/registration.hpp>

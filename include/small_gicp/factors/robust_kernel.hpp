@@ -7,6 +7,56 @@
 
 namespace small_gicp {
 
+struct Tukey {
+  struct Setting {
+    double c = 1.0;
+  };
+
+  Tukey(const Setting& setting) : c(setting.c) {}
+
+  double weight(double e) const {
+    const double r = std::abs(e) / c;
+    if (r >= 1.0) return 0.0;
+    const double r2 = 1.0 - r * r;
+    return r2 * r2;
+  }
+
+  const double c;
+};
+  
+
+struct Welsch {
+  struct Setting {
+    double c = 1.0;
+  };
+
+  Welsch(const Setting& setting) : c(setting.c) {}
+
+  double weight(double e) const {
+    const double r = e / c;
+    return std::exp(-r * r);
+  }
+
+  const double c;
+};
+
+
+struct GemanMcClure {
+  struct Setting {
+    double c = 1.0;
+  };
+
+  GemanMcClure(const Setting& setting) : c(setting.c) {}
+
+  double weight(double e) const {
+    const double r2 = (e / c) * (e / c);
+    return 1.0 / ((1.0 + r2) * (1.0 + r2));
+  }
+
+  const double c;
+};
+
+
 /// @brief Huber robust kernel
 struct Huber {
 public:
