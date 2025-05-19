@@ -100,6 +100,26 @@ public:
   const double c;  ///< Kernel width
 };
 
+/// @brief Cauchy robust kernel
+struct Empty_Factor {
+  public:
+    /// @brief Huber robust kernel setting
+    struct Setting {
+      double c = 1.0;  ///< Kernel width
+    };
+  
+    /// @brief Constructor
+    Empty_Factor(const Setting& setting) : c(setting.c) {}
+  
+    /// @brief Compute the weight for an error
+    /// @param e Error
+    /// @return  Weight
+    double weight(double e) const { return c; }
+  
+  public:
+    const double c;  ///< Kernel width
+  };
+
 /// @brief Robustify a factor with a robust kernel
 /// @tparam Kernel  Robust kernel
 /// @tparam Factor  Factor

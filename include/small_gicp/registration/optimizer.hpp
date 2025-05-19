@@ -230,8 +230,7 @@ struct RobustLevenbergMarquardtOptimizer {
       : verbose(false),
         max_iterations(20),
         max_inner_iterations(20),
-        init_lambda(1e-3),
-        lambda_factor(10.0) {}
+        tau(1e-2) {}
 
   template <
       typename TargetPointCloud,
@@ -255,8 +254,8 @@ struct RobustLevenbergMarquardtOptimizer {
       std::cout << "--- LM optimization ---" << std::endl;
     }
 
-    double lambda = init_lambda;
-    double v = lambda_factor;
+    double v = 2.0;
+    double lambda = 0.0;
 
     RegistrationResult result(init_T);
     // SolutionRemappingHandler remap_handler;
@@ -267,6 +266,7 @@ struct RobustLevenbergMarquardtOptimizer {
       auto [H, b, e_init] = reduction.linearize(target, source, target_tree, rejector, result.T_target_source, factors);
       general_factor.update_linearized_system(target, source, target_tree, result.T_target_source, &H, &b, &e_init);
       e = e_init;
+      lambda = tau * H.diagonal().maxCoeff();
 
       // remap_handler.compute(H);
 
@@ -276,13 +276,11 @@ struct RobustLevenbergMarquardtOptimizer {
         // Apply damping
         Eigen::Matrix<double, 6, 6> H_damped = H + lambda * Eigen::Matrix<double, 6, 6>::Identity();
 
-        // Block-diagonal preconditioner (rotation/translation split)
-        Eigen::Matrix<double, 6, 6> P = Eigen::Matrix<double, 6, 6>::Identity();
-        for (int k = 0; k < 3; ++k) {
-          double r = std::max(H_damped(k, k), 1e-12);
-          double t = std::max(H_damped(k + 3, k + 3), 1e-12);
-          P(k, k) = 1.0 / std::sqrt(r);
-          P(k + 3, k + 3) = 1.0 / std::sqrt(t);
+        // Adaptive diagonal (Jacobi) preconditioner
+        Eigen::Matrix<double, 6, 6> P = Eigen::Matrix<double, 6, 6>::Zero();
+        for (int k = 0; k < 6; ++k) {
+          double d = std::max(H_damped(k, k), 1e-12);
+          P(k, k) = 1.0 / std::sqrt(d);
         }
 
         // Preconditioned system
@@ -331,18 +329,21 @@ struct RobustLevenbergMarquardtOptimizer {
                     << std::endl;
         }
 
-        if (rho > 0) {
+        if (rho > 0 && std::isfinite(new_e) && std::isfinite(delta.norm())) {
           result.T_target_source = new_T;
           e = new_e;
-          lambda = std::max(lambda * std::max(1.0 / 3.0, 1.0 - std::pow(2.0 * rho - 1.0, 3.0)), 1e-9);
-          v = lambda_factor;
+          lambda = lambda * std::max(1.0 / 3.0, 1.0 - std::pow(2.0 * rho - 1.0, 3.0));
+          lambda = std::max(lambda, 1e-9); // Avoid too small lambda
           step_accepted = true;
           result.converged = criteria.converged(delta) || std::abs(expected) < 1e-12;
+          // Reset v for future additive updates
+          v = 2.0;
           break;
         } else {
-          lambda *= v;
-          v *= 2.0;
+          lambda = lambda + v;    // Additive increase (Nielsen’s method)
+          v = v * 2.0;            // Exponential growth to escape poor regions
         }
+
       }
 
       result.iterations = i + step_accepted;
@@ -366,8 +367,104 @@ struct RobustLevenbergMarquardtOptimizer {
   bool verbose;
   int max_iterations;
   int max_inner_iterations;
-  double init_lambda;
-  double lambda_factor;
+  double  tau;
+};
+
+struct HouseholderSolver {
+  HouseholderSolver()
+      : verbose(false),
+        max_iterations(30),
+        step_shrink(0.5),    // back-tracking factor
+        min_step_scale(1e-3) // give up if step is scaled below this
+  {}
+
+  template <
+      typename TargetPointCloud,
+      typename SourcePointCloud,
+      typename TargetTree,
+      typename CorrespondenceRejector,
+      typename TerminationCriteria,
+      typename Reduction,
+      typename Factor,
+      typename GeneralFactor>
+  RegistrationResult optimize(const TargetPointCloud& target,
+                              const SourcePointCloud& source,
+                              const TargetTree& target_tree,
+                              const CorrespondenceRejector& rejector,
+                              const TerminationCriteria& criteria,
+                              Reduction& reduction,
+                              const Eigen::Isometry3d& init_T,
+                              std::vector<Factor>& factors,
+                              GeneralFactor& general_factor) const {
+    if (verbose) std::cout << "--- Householder Gauss-Newton optimisation ---\n";
+
+    RegistrationResult result(init_T);
+    double e = std::numeric_limits<double>::max();
+
+    for (int i = 0; i < max_iterations && !result.converged; ++i) {
+      /* ---------- build normal-equation ---------- */
+      auto [H, b, e_init] = reduction.linearize(
+          target, source, target_tree, rejector, result.T_target_source, factors);
+      general_factor.update_linearized_system(
+          target, source, target_tree, result.T_target_source, &H, &b, &e_init);
+
+      /* ---------- solve H δ = –b ---------- */
+      Eigen::Matrix<double, 6, 1> delta =
+          Eigen::HouseholderQR<Eigen::Matrix<double, 6, 6>>(H).solve(-b);
+      if (!delta.allFinite()) throw std::runtime_error("[HouseholderSolver] NaNs in δ");
+
+      /* ---------- back-tracking line-search ---------- */
+      double scale = 1.0;
+      Eigen::Isometry3d new_T;
+      double new_e = e_init;
+      bool accepted = false;
+      while (scale >= min_step_scale) {
+        new_T = result.T_target_source * se3_exp(scale * delta);
+        new_e = reduction.error(target, source, new_T, factors);
+        general_factor.update_error(target, source, new_T, &new_e);
+
+        if (new_e < e_init) {          // improvement
+          accepted = true;
+          break;
+        }
+        scale *= step_shrink;          // shrink step and retry
+      }
+      if (!accepted) {
+        if (verbose) std::cerr << "[HouseholderSolver] no descent, terminating\n";
+        break;                         // leave optimisation
+      }
+
+      /* ---------- commit step ---------- */
+      result.T_target_source = new_T;
+      e = new_e;
+      result.error = new_e;
+      result.H = H;
+      result.b = b;
+      result.iterations = i + 1;
+
+      if (verbose) {
+        std::cout << "iter=" << i
+                  << "  e=" << e_init
+                  << "  new_e=" << new_e
+                  << "  scale=" << scale
+                  << "  |δr|=" << delta.head<3>().norm()
+                  << "  |δt|=" << delta.tail<3>().norm()
+                  << '\n';
+      }
+
+      result.converged = criteria.converged(scale * delta);
+    }
+
+    result.num_inliers = static_cast<int>(std::count_if(
+        factors.begin(), factors.end(), [](const auto& f) { return f.inlier(); }));
+
+    return result;
+  }
+
+  bool verbose;
+  int  max_iterations;
+  double step_shrink;
+  double min_step_scale;
 };
 
 }  // namespace small_gicp

@@ -34,7 +34,7 @@ struct CompoundRejector {
   /// @brief Constructor
   /// @param max_sq_dist       Maximum allowed squared distance between corresponding points
   /// @param max_angle_deg     Maximum allowed angle (in degrees) between surface normals
-  CompoundRejector(double max_sq_dist = 1.0, double max_angle_deg = 90.0)
+  CompoundRejector(double max_sq_dist = 1.0, double max_angle_deg = 45.0)
       : max_dist_sq(max_sq_dist), max_angle_cos(std::cos(max_angle_deg * M_PI / 180.0)) {}
 
   template <typename TargetPointCloud, typename SourcePointCloud>
@@ -61,13 +61,15 @@ struct CompoundRejector {
       const Eigen::Vector3d n_source = (T.linear() * n_source_v4.template head<3>()).normalized();
 
       const double dot = std::abs(n_target.dot(n_source));
-
-      // Uncomment for debugging:
-      // std::cerr << "dot = " << dot << " (thresh = " << max_angle_cos << ")" << std::endl;
-
       if (dot < max_angle_cos) {
         return true;  // reject if angle between normals is too large
       }
+
+      // const double dot = n_target.dot(n_source);
+      // constexpr double eps = 1e-12;
+      // if (dot + eps < max_angle_cos)      // reject if angle > θ
+      //     return true;
+
     }else{
       // Raise an error if normals are required but not available
       throw std::runtime_error("CompoundRejector requires point clouds with normals");

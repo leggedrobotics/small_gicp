@@ -17,7 +17,7 @@ inline int omp_get_thread_num() {
 
 /// @brief Parallel reduction with OpenMP backend (SIMD-aligned)
 struct ParallelReductionOMP {
-  ParallelReductionOMP() : num_threads(4) {}
+  ParallelReductionOMP() : num_threads(8) {}
 
   template <typename TargetPointCloud, typename SourcePointCloud, typename TargetTree, typename CorrespondenceRejector, typename Factor>
   std::tuple<Eigen::Matrix<double, 6, 6>, Eigen::Matrix<double, 6, 1>, double> linearize(
