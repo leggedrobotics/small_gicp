@@ -1,5 +1,3 @@
-// SPDX-FileCopyrightText: Copyright 2024 Kenji Koide
-// SPDX-License-Identifier: MIT
 #pragma once
 
 #include <Eigen/Core>
@@ -11,9 +9,8 @@
 
 namespace small_gicp {
 
-/// @brief Symmetric point-to-plane per-point error factor.
 struct SymmetricPointToPlaneICPFactor {
-  struct Setting {};  // No parameters, interface unchanged
+  struct Setting {};
 
   explicit SymmetricPointToPlaneICPFactor(const Setting& = Setting())
       : target_index(std::numeric_limits<size_t>::max()),
@@ -33,7 +30,7 @@ struct SymmetricPointToPlaneICPFactor {
                  Eigen::Matrix<double, 6, 1>* b,
                  double*                   e)
   {
-    constexpr size_t k_neighbors = 5;              
+    constexpr size_t k_neighbors = 7;              
     constexpr double degenerate_threshold = 1e-6;  // Threshold for ‖n_s + n_t‖²
 
     source_index = source_idx;
@@ -69,16 +66,16 @@ struct SymmetricPointToPlaneICPFactor {
       const Eigen::Vector3d p_t = traits::point(target, k_index).template head<3>();
       Eigen::Vector3d n_t       = traits::normal(target, k_index).template head<3>();
 
-      // ---- Mathematically consistent flipping: align n_t with n_s
       if (n_s.dot(n_t) < 0.0) n_t = -n_t;
 
       // ---- Averaged normal, only if not degenerate
       Eigen::Vector3d n_avg = n_s + n_t;
       // double norm2 = n_avg.squaredNorm();
-
-      // if (norm2 < degenerate_threshold) continue;   // skip nearly opposite normals
-
+      // if (norm2 < degenerate_threshold) continue;
       n_avg.normalize();
+
+      // J = [ nᵀ (-R skew(p_s)) | nᵀ R ]   // 1×6
+      // ^ 3 rot cols        ^ 3 trans cols
 
       // ---- Residual and Jacobian, using correct right-mult. convention
       const Eigen::Vector3d r = p_s_tr - p_t;
