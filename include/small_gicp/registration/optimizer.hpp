@@ -3,6 +3,7 @@
 #pragma once
 
 #include <iostream>
+#include <deque>
 #include <small_gicp/util/lie.hpp>
 #include <small_gicp/registration/registration_result.hpp>
 #include <Eigen/SVD>
